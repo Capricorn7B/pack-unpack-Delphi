@@ -1,7 +1,7 @@
 unit uPackUnpack;
 
 interface
-uses SysUtils, StrUtils, Generics.Collections, Classes, System.Generics.Collections, Math, uSwapBytes;
+uses SysUtils, StrUtils, Generics.Collections, Classes, Math, uSwapBytes;
 
 function Pack (sFormat : string; acaParam : array of TCharArray) : TBytes;
 function UnPack(sFormat : string; abVal : TBytes) : TDictionary<string,Variant>;
