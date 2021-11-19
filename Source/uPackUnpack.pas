@@ -5,11 +5,19 @@ uses SysUtils, StrUtils, Generics.Collections, Classes, System.Generics.Collecti
 
 function Pack (sFormat : string; acaParam : array of TCharArray) : TBytes;
 function UnPack(sFormat : string; abVal : TBytes) : TDictionary<string,Variant>;
+//function IfThen (b : Boolean; a1, a2 : TCharArray) : TCharArray; overload;
+//function IfThen (b : Boolean; c1, c2 : Char) : Char; overload;
 
 implementation
 
-
-function IfThenChar(b : Boolean; c1, c2 : Char) : Char;
+/// <summary>
+/// IfThen for char args
+/// </summary>
+/// <param name="b">Boolean condition arg</param>
+/// <param name="c1">First char arg</param>
+/// <param name="c2">Second char arg</param>
+/// <returns> First char arg on (b = true), else - second char arg </returns>
+function IfThen (b : Boolean; c1, c2 : Char) : Char; overload;
 begin
   if b then
     Result := c1
@@ -17,12 +25,27 @@ begin
     Result := c2;
 end;
 
+/// <summary>
+/// IfThen for TCharArray args
+/// </summary>
+/// <param name="b">Boolean condition arg</param>
+/// <param name="c1">First TCharArray arg</param>
+/// <param name="c2">Second TCharArray arg</param>
+/// <returns> First TCharArray arg on (b = true), else - second TCharArray arg </returns>
+function IfThen (b : Boolean; a1, a2 : TCharArray) : TCharArray; overload;
+begin
+  if b then
+    Result := a1
+  else
+    Result := a2;
+end;
+
 function Pack (sFormat : string; acaParam : array of TCharArray) : TBytes;
 var
   bs : TBytesStream;
   bw : TBinaryWriter;
-  l, i, j, utlen : UInt64;
-  cf : Char;
+  l, i, j, uQual, uParamLen : UInt64;
+  cF : Char;
 
   function Get_Qual (k : UInt64) : string;
   begin
@@ -48,29 +71,29 @@ var
   j := 0;
   while i < sFormat.Length + 1 do
     begin
-      cf := sFormat[i];
-      utlen := StrToInt(Get_Qual(i));
-      case cf of
+      cF := sFormat[i];
+      uQual := StrToUInt64Def(Get_Qual(i), 1);
+      case cF of
 //A 	SPACE-padded string
 //a 	NUL-padded string
-//Z 	NUL-padded string
+//Z 	null-terminated NUL-padded string  (!!!error in php manual description!!!)
         'A', 'a', 'Z' :
           begin
-            var tvlen := Length(acaParam[j]);
-            if (utlen = 0) or (utlen = tvlen) then
+            uParamLen := Length(acaParam[j]);
+            if (uQual = 0) or (uQual = uParamLen + IfThen(cF = 'Z', 1, 0)) then
               begin
-                bw.Write(acaParam[j]);
-                l := l + tvlen;
+                bw.Write(acaParam[j] + IfThen(cF = 'Z', [#0], []));
+                l := l + uParamLen + IfThen(cF = 'Z', 1, 0);
               end
             else
               begin
-                l := l + utlen;
-                if (utlen < tvlen) then
-                  bw.Write(Copy(acaParam[j], 0, utlen))
+                l := l + uQual;
+                if (uQual < uParamLen + IfThen(cF = 'Z', 1, 0)) then
+                  bw.Write(Copy(acaParam[j], 0, uQual - IfThen(cF = 'Z', 1, 0)) + IfThen(cF = 'Z', [#0], []))
                 else
                   begin
                     bw.Write(acaParam[j]);
-                    bw.Write(StringOfChar(IfThenChar(cf = 'A',' ', #0), utlen - tvlen).ToCharArray);
+                    bw.Write(StringOfChar(IfThen(cF = 'A',' ', #0), uQual - uParamLen).ToCharArray);
                   end;
               end
           end;
@@ -79,16 +102,16 @@ var
         'H', 'h':
           begin
             var uT : UInt64 := 0;
-            var uL : UInt64 := IfThen((utlen = 0) or (utlen >= Length(acaParam[j])), Length(acaParam[j]), utlen);
+            var uL : UInt64 := IfThen((uQual = 0) or (uQual >= Length(acaParam[j])), Length(acaParam[j]), uQual);
             while uT < uL do
               begin
                 if uL - uT >= 2 then
                   begin
-                    bw.Write(StrToInt('$' + IfThen(cf = 'H', acaParam[j][uT] + acaParam[j][uT+1], acaParam[j][uT + 1] + acaParam[j][uT])));
+                    bw.Write(StrToInt('$' + IfThen(cF = 'H', acaParam[j][uT] + acaParam[j][uT+1], acaParam[j][uT + 1] + acaParam[j][uT])));
                     uT := uT + 1;
                   end
                 else
-                  bw.Write(StrToInt('$' + IfThen(cf = 'H', acaParam[j][uT] + '0', '0' + acaParam[j][uT])));
+                  bw.Write(StrToInt('$' + IfThen(cF = 'H', acaParam[j][uT] + '0', '0' + acaParam[j][uT])));
                 uT := uT + 1;
                 l := l + 1;
               end;
@@ -98,7 +121,7 @@ var
 //J 	unsigned long long (always 64 bit, big endian byte order)
         'Q', 'P', 'J':
           begin
-            if (cf = 'P') or ((cf = 'Q') and LEByteOrder) then
+            if (cF = 'P') or ((cF = 'Q') and LEByteOrder) then
               begin
                 bw.Write(UInt64(acaParam[j]));
                 l:= l + SizeOf(UInt64);
@@ -114,7 +137,7 @@ var
 //n 	unsigned short (always 16 bit, big endian byte order)
         'S', 'n', 'v' :
           begin
-            if (cf = 'v') or ((cf = 'S') and LEByteOrder) then
+            if (cF = 'v') or ((cF = 'S') and LEByteOrder) then
               begin
                 bw.Write(UInt16(acaParam[j]));
                 l := l + SizeOf(UInt16);
@@ -130,7 +153,7 @@ var
 //G 	float (machine dependent size, big endian byte order)
         'f', 'g', 'G' :
           begin
-            if (cf = 'g') or ((cf = 'f') and LEByteOrder) then
+            if (cF = 'g') or ((cF = 'f') and LEByteOrder) then
               begin
                 bw.Write(Single(acaParam[j]));
                 l := l + SizeOf(Single);
@@ -146,7 +169,7 @@ var
 //E 	double (machine dependent size, big endian byte order)
         'd', 'e', 'E' :
           begin
-            if (cf = 'e') or ((cf = 'd') and LEByteOrder) then
+            if (cF = 'e') or ((cF = 'd') and LEByteOrder) then
               begin
                 bw.Write(string(acaParam[j]).ToDouble);
                 l := l + SizeOf(Double);
@@ -162,7 +185,7 @@ var
 //N 	unsigned long (always 32 bit, big endian byte order)
         'L', 'N', 'V' :
           begin
-            if (cf = 'V') or ((cf = 'L') and LEByteOrder) then
+            if (cF = 'V') or ((cF = 'L') and LEByteOrder) then
               begin
                 bw.Write(UInt32(acaParam[j]));
                 l := l + SizeOf(UInt32);
@@ -217,7 +240,7 @@ var
 //l 	signed long (always 32 bit, machine byte order)
         'i', 'l' :
           begin
-            if (cf = 'l') or ((cf = 'i') and (SizeOf(NativeInt) = 4)) then
+            if (cF = 'l') or ((cF = 'i') and (SizeOf(NativeInt) = 4)) then
               begin
                 if LEByteOrder then
                   bw.Write(Int32(acaParam[j]))
@@ -254,8 +277,34 @@ var
                 l := l + 8;
               end;
           end;
-
-
+//@ 	NUL-fill to absolute position
+        '@' :
+          begin
+            if uQual > l then
+              bw.Write(StringOfChar(#0, uQual - l).ToCharArray)
+            else if uQual = 0 then
+              raise Exception.Create('Wrong * param for @')
+            else
+              bw.Seek(uQual, soBeginning);
+            l := uQual;
+          end;
+//x 	NUL byte
+        'x' :
+          begin
+            bw.Write(StringOfChar(#0, uQual).ToCharArray);
+            l := l + uQual;
+          end;
+//X 	Back up one byte
+        'X' :
+          begin
+            if l >= uQual then
+              begin
+                bw.Seek(-uQual, soCurrent);
+                l := l - uQual;
+              end
+            else
+              raise Exception.Create('Wrong param for X - out of string');
+          end;
       end;
       i := i + 1;
       j := j + 1;
@@ -263,10 +312,6 @@ var
 
   Result := Copy(bs.Bytes, 0, l);
 end;
-//  Code 	Description
-//x 	NUL byte
-//X 	Back up one byte
-//@ 	NUL-fill to absolute position
 
 function UnPack(sFormat : string; abVal : TBytes) : TDictionary<string,Variant>;
 var
